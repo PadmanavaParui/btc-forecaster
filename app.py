@@ -128,10 +128,18 @@ col5.metric("Current Vol/hr",     f"{cur_vol:.3f}%")
 
 st.divider()
 
+# col6, col7, col8 = st.columns(3)
+# col6.metric("Backtest Coverage",  f"{COVERAGE:.2%}", "target: 95%")
+# col7.metric("Avg Range Width",    f"${AVG_WIDTH:,.0f}")
+# col8.metric("Mean Winkler Score", f"${WINKLER:,.0f}", "lower is better")
+
 col6, col7, col8 = st.columns(3)
-col6.metric("Backtest Coverage",  f"{COVERAGE:.2%}", "target: 95%")
+# col6.metric("Backtest Coverage",  f"{COVERAGE:.2%}", "target: 95%")
+col6.metric("Backtest Coverage", f"{COVERAGE:.2%}", "target: 95%", delta_color="off")
 col7.metric("Avg Range Width",    f"${AVG_WIDTH:,.0f}")
-col8.metric("Mean Winkler Score", f"${WINKLER:,.0f}", "lower is better")
+# col8.metric("Mean Winkler Score", f"${WINKLER:,.0f}", "lower is better")
+col8.metric("Mean Winkler Score", f"${WINKLER:,.0f}", "lower is better", delta_color="off")
+
 
 st.divider()
 
