@@ -1,3 +1,5 @@
+import os
+from datetime import timezone
 import streamlit as st
 import numpy as np
 import pandas as pd
@@ -8,6 +10,93 @@ import plotly.graph_objects as go
 
 st.set_page_config(page_title="BTC Forecaster", layout="wide")
 st.title("BTC/USDT — Live 1-Hour Forecast")
+
+# ── Persistence helpers ────────────────────────────────────────────────────
+def get_supabase_headers():
+    return {
+        "apikey"       : st.secrets["SUPABASE_KEY"],
+        "Authorization": f"Bearer {st.secrets['SUPABASE_KEY']}",
+        "Content-Type" : "application/json"
+    }
+
+def save_prediction(timestamp, current_price, low, high):
+    """Save today's prediction. Skip if this timestamp already saved."""
+    url     = st.secrets["SUPABASE_URL"] + "/rest/v1/predictions"
+    headers = get_supabase_headers()
+
+    # check if already saved
+    check = requests.get(
+        url, headers=headers,
+        params={"timestamp": f"eq.{timestamp}", "select": "id"}
+    )
+    if check.json():
+        return  # already saved this hour
+
+    requests.post(url, headers=headers, json={
+        "timestamp"    : timestamp,
+        "current_price": current_price,
+        "lower_95"     : low,
+        "upper_95"     : high,
+    })
+
+def fill_actuals():
+    """For past predictions with no actual, fetch real price and update."""
+    url     = st.secrets["SUPABASE_URL"] + "/rest/v1/predictions"
+    headers = get_supabase_headers()
+
+    # get rows missing actuals
+    rows = requests.get(
+        url, headers=headers,
+        params={"actual": "is.null", "select": "*"}
+    ).json()
+
+    for row in rows:
+        pred_time = pd.Timestamp(row["timestamp"])
+        now       = pd.Timestamp.now(tz=timezone.utc)
+        if pred_time > now:
+            continue  # bar hasn't closed yet
+
+        # fetch that specific bar from Binance
+        r = requests.get(
+            "https://data-api.binance.vision/api/v3/klines",
+            params={
+                "symbol"   : "BTCUSDT",
+                "interval" : "1h",
+                "startTime": int(pred_time.timestamp() * 1000),
+                "limit"    : 1
+            }
+        )
+        if not r.json():
+            continue
+
+        actual_price = float(r.json()[0][4])  # close price
+        width        = row["upper_95"] - row["lower_95"]
+        hit          = row["lower_95"] <= actual_price <= row["upper_95"]
+        alpha        = 0.05
+        if actual_price < row["lower_95"]:
+            winkler = width + (2/alpha) * (row["lower_95"] - actual_price)
+        elif actual_price > row["upper_95"]:
+            winkler = width + (2/alpha) * (actual_price - row["upper_95"])
+        else:
+            winkler = width
+
+        requests.patch(
+            url, headers=headers,
+            params={"id": f"eq.{row['id']}"},
+            json={"actual": actual_price, "hit": hit,
+                  "width": width, "winkler": winkler}
+        )
+
+def load_history():
+    url     = st.secrets["SUPABASE_URL"] + "/rest/v1/predictions"
+    headers = get_supabase_headers()
+    rows    = requests.get(
+        url, headers=headers,
+        params={"select": "*", "order": "created_at.desc", "limit": "200"}
+    ).json()
+    return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+
 
 # ── Fetch live data ────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)  # refresh every 5 minutes
@@ -111,6 +200,11 @@ with st.spinner("Fetching live BTC data and running model..."):
         prices.values.tolist(), prices.index.tolist()
     )
 
+# ── Save this prediction + fill past actuals ───────────────────────────────
+next_bar_ts = prices.index[-1].isoformat()
+save_prediction(next_bar_ts, S0, low95, high95)
+fill_actuals()
+
 last_bar_time = prices.index[-1].strftime("%Y-%m-%d %H:%M UTC")
 
 # ── Backtest metrics (hardcode from your Part A run) ──────────────────────
@@ -189,3 +283,25 @@ fig.update_layout(
 
 st.plotly_chart(fig, use_container_width=True)
 st.caption(f"Model refreshes every 5 minutes. Forecast is for the hour closing at {next_time.strftime('%H:%M UTC')}.")
+
+
+
+# ── Prediction history ─────────────────────────────────────────────────────
+st.subheader("Prediction history")
+hist = load_history()
+if hist.empty:
+    st.info("No history yet — check back after a few visits.")
+else:
+    def colour_hit(val):
+        if val is True:  return "background-color: #d4edda"
+        if val is False: return "background-color: #f8d7da"
+        return ""
+
+    display_cols = ["timestamp","current_price","lower_95",
+                    "upper_95","actual","hit","winkler"]
+    existing = [c for c in display_cols if c in hist.columns]
+    st.dataframe(
+        hist[existing].style.applymap(colour_hit, subset=["hit"]
+            if "hit" in existing else []),
+        use_container_width=True
+    )

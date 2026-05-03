@@ -1,4 +1,5 @@
 streamlit
+supabase
 arch
 scipy
 plotly
