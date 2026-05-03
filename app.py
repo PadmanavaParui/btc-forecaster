@@ -301,7 +301,9 @@ else:
                     "upper_95","actual","hit","winkler"]
     existing = [c for c in display_cols if c in hist.columns]
     st.dataframe(
-        hist[existing].style.applymap(colour_hit, subset=["hit"]
+        # hist[existing].style.applymap(colour_hit, subset=["hit"]
+        #     if "hit" in existing else []),
+        hist[existing].style.map(colour_hit, subset=["hit"]
             if "hit" in existing else []),
         use_container_width=True
     )
